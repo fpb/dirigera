@@ -1,5 +1,5 @@
 import ssl
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import requests
 import websocket
 from urllib3.exceptions import InsecureRequestWarning
@@ -11,6 +11,7 @@ from ..devices.controller import Controller, dict_to_controller
 from ..devices.outlet import Outlet, dict_to_outlet
 from ..devices.environment_sensor import EnvironmentSensor, dict_to_environment_sensor
 from ..devices.open_close_sensor import OpenCloseSensor, dict_to_open_close_sensor
+from ..devices.scene import Scene, dict_to_scene
 
 requests.packages.urllib3.disable_warnings(  # pylint: disable=no-member
     category=InsecureRequestWarning
@@ -42,15 +43,15 @@ class Hub(AbstractSmartHomeHub):
         return {"Authorization": f"Bearer {self.token}"}
 
     def create_event_listener(
-        self,
-        on_open: Any = None,
-        on_message: Any = None,
-        on_error: Any = None,
-        on_close: Any = None,
-        on_ping: Any = None,
-        on_pong: Any = None,
-        on_data: Any = None,
-        on_cont_message: Any = None,
+            self,
+            on_open: Any = None,
+            on_message: Any = None,
+            on_error: Any = None,
+            on_close: Any = None,
+            on_ping: Any = None,
+            on_pong: Any = None,
+            on_data: Any = None,
+            on_cont_message: Any = None,
     ):
         wsapp = websocket.WebSocketApp(
             self.websocket_base_url,
@@ -88,6 +89,21 @@ class Hub(AbstractSmartHomeHub):
         response.raise_for_status()
         return response.json()
 
+    def post(self, route: str, data: Dict[str, Any] = None) -> Optional[Dict[str, Any]]:
+        response = requests.post(
+            f"{self.api_base_url}{route}",
+            headers=self.headers(),
+            json=data,
+            timeout=10,
+            verify=False,
+        )
+        response.raise_for_status()
+
+        if len(response.content) == 0:
+            return None
+
+        return response.json()
+
     def get_lights(self) -> List[Light]:
         """
         Fetches all lights registered in the Hub
@@ -113,6 +129,16 @@ class Hub(AbstractSmartHomeHub):
         devices = self.get("/devices")
         outlets = list(filter(lambda x: x["type"] == "outlet", devices))
         return [dict_to_outlet(outlet, self) for outlet in outlets]
+
+    def get_outlet_by_name(self, outlet_name: str) -> Outlet:
+        """
+        Fetches all outlets and returns first result that matches this name
+        """
+        outlets = self.get_outlets()
+        outlets = list(filter(lambda x: x.custom_name == outlet_name, outlets))
+        if len(outlets) == 0:
+            raise AssertionError(f"No outlet found with name {outlet_name}")
+        return outlets[0]
 
     def get_environment_sensors(self) -> List[EnvironmentSensor]:
         """
@@ -175,3 +201,17 @@ class Hub(AbstractSmartHomeHub):
         if len(controllers) == 0:
             raise AssertionError(f"No controller found with name {controller_name}")
         return controllers[0]
+
+    def get_scenes(self) -> List[Scene]:
+        """
+        Fetches all scenes
+        """
+        scenes = self.get("/scenes")
+        return [dict_to_scene(data, self) for data in scenes]
+
+    def get_scene_by_id(self, scene_id) -> Scene:
+        """
+        Fetches a specific scene by a given id
+        """
+        data = self.get(f"/scenes/{scene_id}")
+        return dict_to_scene(data, self)
